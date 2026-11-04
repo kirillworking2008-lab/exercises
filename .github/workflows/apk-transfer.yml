@@ -1,0 +1,55 @@
+name: Prepare APK transfer
+
+on:
+  push:
+    branches: [arena/1a0a7d15-exercises]
+    paths: [.github/workflows/apk-transfer.yml]
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  transfer:
+    name: Prepare existing APK for Drive upload
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RUN_ID: '41881994921'
+    steps:
+      - name: Retrieve the verified build
+        run: gh run download "$RUN_ID" --repo "$GH_REPO" --name povtor-android-debug --dir "$RUNNER_TEMP/povtor-apk"
+      - name: Validate APK and prepare temporary transfer object
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+          import os, json, base64, hashlib
+          root = Path(os.environ['RUNNER_TEMP'])
+          directory = root / 'povtor-apk'
+          apk = directory / 'povtor-1.0.0-debug.apk'
+          data = apk.read_bytes()
+          expected = (directory / 'SHA256SUMS.txt').read_text().split()[0]
+          actual = hashlib.sha256(data).hexdigest()
+          assert actual == expected, 'Build checksum mismatch'
+          assert 0 < len(data) < 50 * 1024 * 1024, 'Unexpected APK size'
+          with ZipFile(apk) as archive:
+              for name in ['AndroidManifest.xml', 'classes.dex', 'assets/public/index.html', 'assets/public/app.js']:
+                  assert name in archive.namelist(), f'Missing {name}'
+          (root / 'apk-blob.json').write_text(json.dumps({'encoding': 'base64', 'content': base64.b64encode(data).decode('ascii')}))
+          (root / 'apk-transfer-metadata.json').write_text(json.dumps({'sha256': actual, 'size': len(data)}))
+          PY
+      - name: Expose temporary transfer identifier
+        run: |
+          # A loose object only: no APK is added to any branch or commit.
+          gh api --method POST "repos/$GH_REPO/git/blobs" --input "$RUNNER_TEMP/apk-blob.json" > "$RUNNER_TEMP/apk-object.json"
+          python3 - <<'PY'
+          from pathlib import Path
+          import os, json
+          root = Path(os.environ['RUNNER_TEMP'])
+          blob = json.loads((root / 'apk-object.json').read_text())['sha']
+          metadata = json.loads((root / 'apk-transfer-metadata.json').read_text())
+          print(f"::notice title=APK transfer::blob={blob} sha256={metadata['sha256']} size={metadata['size']}")
+          PY
