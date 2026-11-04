@@ -1,0 +1,22 @@
+{
+  "appId": "ru.povtor.app",
+  "appName": "Повтор",
+  "webDir": "www",
+  "backgroundColor": "#080d12",
+  "android": {
+    "allowMixedContent": false,
+    "backgroundColor": "#080d12",
+    "webContentsDebuggingEnabled": false,
+    "minWebViewVersion": 111
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 0
+    },
+    "SystemBars": {
+      "style": "DARK",
+      "insetsHandling": "css",
+      "initialViewportFitValueHint": "cover"
+    }
+  }
+}

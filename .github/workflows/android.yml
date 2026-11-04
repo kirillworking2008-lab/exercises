@@ -1,0 +1,83 @@
+name: Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [arena/1a0a7d15-exercises]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: povtor-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: Web and offline checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm audit --audit-level=high
+      - run: npm test
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-test-report
+          path: playwright-report/
+          retention-days: 7
+
+  android:
+    name: Build installable APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - run: npm ci
+      - run: npm test
+      - run: npm run android:sync
+      # Keep a development signing identity across builds when the cache is available.
+      # This is only a DEBUG key, never a production signing key.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: povtor-android-debug-signing-v1
+      - name: Assemble and lint Android
+        working-directory: android
+        run: ./gradlew --no-daemon assembleDebug lintDebug
+      - name: Prepare APK
+        run: |
+          mkdir -p artifacts
+          cp android/app/build/outputs/apk/debug/app-debug.apk artifacts/povtor-1.0.0-debug.apk
+          sha256sum artifacts/povtor-1.0.0-debug.apk > artifacts/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: povtor-android-debug
+          path: artifacts/
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: android-lint-report
+          path: android/app/build/reports/
+          retention-days: 7
